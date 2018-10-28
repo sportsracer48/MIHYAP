@@ -16,6 +16,7 @@ HEIGHT = 900
 
 white = np.array([255,255,255])
 black = np.array([0,0,0])
+red   = np.array([255,0,0])
 
 bgColor = white;
 fgColor = black;
@@ -31,21 +32,45 @@ fadeTime = 1
 
 tutorialDisplayWords = ["click","attention"]
 tutorialSpeakWords   = ["click","the","word","when","you","hear","it","we","value","your","attention"]
-realWordPool = ["this","is","a","test"]
+tutorialSpeakWords   = ["click","attention"]
+realWordPool         = ["this","is","a","test"]
 tutorialMode         = True
 lastSpokenWord       = ""
 lastSpokenIndex      = -1
-lastSpeakTime        = 0
+lastSpeakTime        = time.clock()
 timeBetweenWords     = 2
 
 displayWord = tutorialDisplayWords[0]
 wordPool = tutorialSpeakWords
 
+timeout = 60
+lastInput = time.clock()
+displayWordChance = 0.1
+
+#flash red for 0.5 seconds
+errorTime = 0.5
+erroring =  False
+lastError = 0
+
+def reset():
+    global bgColor, fgColor, colorChanged, colorChanging, tutorialMode
+    global displayWord, wordPool, lastSpokenWord, lastSpokenIndex
+    bgColor = white
+    fgColor = black
+    colorChanged = False
+    colorChanging = False
+
+    tutorialMode = True
+    wordPool = tutorialSpeakWords
+    displayWord = tutorialDisplayWords[0]
+    lastSpokenWord = ""
+    lastSpokenIndex = -1
+
 def initwords():
     for word in tutorialSpeakWords+realWordPool:
-        if not os.path.isfile(word):
+        if not os.path.isfile(os.path.join("words",word)):
             tts = gTTS(text=word,lang='en')
-            tts.save(word)
+            tts.save(os.path.join("words",word))
 
 def speakWord(word):
     global lastSpeakTime,lastSpokenWord,lastSpokenIndex
@@ -53,11 +78,11 @@ def speakWord(word):
     lastSpokenWord = word
     lastSpokenIndex = wordPool.index(word)
 
-    subprocess.Popen(["mpg123",word])
+    subprocess.Popen(["mpg123",os.path.join("words",word)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 def onClick():
     global displayWord, fading, fadeStart, colorChanging, changeStart, wordPool
-    global tutorialMode, lastSpeakTime
+    global tutorialMode, lastSpeakTime, fgColor, lastError, erroring
     if tutorialMode:
         if lastSpokenWord == displayWord:
             #success
@@ -79,6 +104,9 @@ def onClick():
         else:
             #penalize failure
             lastSpeakTime = time.clock()+timeBetweenWords
+            lastError = time.clock()
+            erroring = True
+            fgColor = red
     else:
         #not tutorial mode
         if lastSpokenWord == displayWord:
@@ -89,13 +117,11 @@ def onClick():
         else:
             #penalize failure
             lastSpeakTime = time.clock()+timeBetweenWords
+            lastError = time.clock()
+            erroring = True
+            fgColor = red
 
-def reset():
-    global bgColor, fgColor, colorChanged, colorChanging
-    bgColor = white
-    fgColor = black
-    colorChanged = False
-    colorChanging = False
+
 
 def displayText(screen, msg):
     text = pygame.font.Font('freesansbold.ttf',115)
@@ -135,6 +161,7 @@ def main():
 
     global colorChanging, colorChanged, changeStart, bgColor, fgColor
     global fading, fadeStart
+    global lastInput
 
     while running:
         onBox = textRect is not None and textRect.collidepoint(pos)
@@ -142,7 +169,10 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.MOUSEBUTTONUP:
+            elif event.type == pygame.MOUSEMOTION:
+                lastInput = time.clock()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                lastInput = time.clock()
                 if onBox:
                     onClick()
 
@@ -164,10 +194,15 @@ def main():
                 speakWord(word)
             else:
                 word = random.choice(wordPool)
+                if random.uniform(0,1)<displayWordChance:
+                    word = displayWord
                 speakWord(word)
 
+        if erroring and time.clock()-lastError > errorTime:
+            fgColor = black if tutorialMode else white
 
-
+        if not tutorialMode and time.clock()-lastInput > timeout:
+            reset()
 
         screen.fill(bgColor)
         textRect = displayText(screen, displayWord)
