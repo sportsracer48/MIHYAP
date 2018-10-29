@@ -10,9 +10,13 @@ from gtts import gTTS
 import subprocess
 import random
 import os
+import RPi.GPIO as GPIO
 
-WIDTH = 1440
-HEIGHT = 900
+def clock():
+    return time.time()
+
+WIDTH = 1920
+HEIGHT = 1080
 
 white = np.array([255,255,255])
 black = np.array([0,0,0])
@@ -32,29 +36,32 @@ fadeTime = 1
 
 tutorialDisplayWords = ["click","attention"]
 tutorialSpeakWords   = ["click","the","word","when","you","hear","it","we","value","your","attention"]
-tutorialSpeakWords   = ["click","attention"]
+#tutorialSpeakWords   = ["click","attention"]
 realWordPool         = ["because", "results", "track", "you", "health", "instantly", "association", "discover", "love", "guarantee", "proven", "announce", "sponsored", "safety", "hurry", "select", "upgrade", "convince", "study", "find", "subliminal", "watch", "new", "effective", "save", "best", "now", "trial", "story", "free", "increase", "attention", "sex", "number one", "recommended", "try", "money", "persuade", "opportunity", "subscription", "yes", "easy", "compare", "claim", "unique", "personalized", "improvement", "disruptive", "quick", "bargain", "challenge", "influence"]
 tutorialMode         = True
 lastSpokenWord       = ""
 lastSpokenIndex      = -1
-lastSpeakTime        = time.clock()
-timeBetweenWords     = 2
+lastSpeakTime        = clock()
+timeBetweenWords     = 1
 
 displayWord = tutorialDisplayWords[0]
 wordPool = tutorialSpeakWords
 
-timeout = 60
-lastInput = time.clock()
-displayWordChance = 0.1
+timeout = 600
+lastInput = clock()
+displayWordChance = 0.05
 
 #flash red for 0.5 seconds
 errorTime = 0.5
 erroring =  False
 lastError = 0
 
+pwm = None
+
 def reset():
     global bgColor, fgColor, colorChanged, colorChanging, tutorialMode
     global displayWord, wordPool, lastSpokenWord, lastSpokenIndex
+    global displayWordChance
     bgColor = white
     fgColor = black
     colorChanged = False
@@ -66,6 +73,9 @@ def reset():
     lastSpokenWord = ""
     lastSpokenIndex = -1
 
+    displayWordChance = .05
+    
+
 def initwords():
     for word in tutorialSpeakWords+realWordPool:
         if not os.path.isfile(os.path.join("words",word)):
@@ -74,7 +84,7 @@ def initwords():
 
 def speakWord(word):
     global lastSpeakTime,lastSpokenWord,lastSpokenIndex
-    lastSpeakTime = time.clock()
+    lastSpeakTime = clock()
     lastSpokenWord = word
     lastSpokenIndex = wordPool.index(word)
 
@@ -83,6 +93,7 @@ def speakWord(word):
 def onClick():
     global displayWord, fading, fadeStart, colorChanging, changeStart, wordPool
     global tutorialMode, lastSpeakTime, fgColor, lastError, erroring
+    global displayWordChance
     if tutorialMode:
         if lastSpokenWord == displayWord:
             #success
@@ -91,20 +102,20 @@ def onClick():
             if nextWordIndex < len(tutorialDisplayWords):
                 displayWord = tutorialDisplayWords[nextWordIndex]
                 fading = True
-                fadeStart = time.clock()
+                fadeStart = clock()
             else:
                 tutorialMode = False
                 colorChanging = True
                 fading = True
-                fadeStart = time.clock()
-                changeStart = time.clock()
-                lastSpeakTime = time.clock()+chageTime
+                fadeStart = clock()
+                changeStart = clock()
                 wordPool = realWordPool
                 displayWord = random.choice(wordPool)
+                dispense()
         else:
             #penalize failure
-            lastSpeakTime = time.clock()+timeBetweenWords
-            lastError = time.clock()
+            lastSpeakTime = clock()
+            lastError = clock()
             erroring = True
             fgColor = red
     else:
@@ -112,12 +123,14 @@ def onClick():
         if lastSpokenWord == displayWord:
             #success
             fading = True
-            fadeStart = time.clock()
+            fadeStart = clock()
             displayWord = random.choice(wordPool)
+            displayWordChance *= .5
+            dispense()
         else:
             #penalize failure
-            lastSpeakTime = time.clock()+timeBetweenWords
-            lastError = time.clock()
+            lastSpeakTime = clock()
+            lastError = clock()
             erroring = True
             fgColor = red
 
@@ -133,7 +146,7 @@ def displayText(screen, msg):
     surface.blit(textSurface, textRect)
     global fading
     if fading:
-        u = (time.clock()-fadeStart)/fadeTime
+        u = (clock()-fadeStart)/fadeTime
         if u<1:
             surface.set_alpha(255*u)
         else:
@@ -149,15 +162,23 @@ def displayCursor(screen, image, pos):
 def main():
     initwords()
     pygame.init()
-
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(3, GPIO.OUT)
+    global pwm
+    pwm = GPIO.PWM(3, 50)
+    pwm.start(0)
 
     pygame.display.set_caption("May I Have Your Attention Please")
-    screen = pygame.display.set_mode((WIDTH,HEIGHT))
+    screen = pygame.display.set_mode((WIDTH,HEIGHT), pygame.DOUBLEBUF)
+    pygame.display.toggle_fullscreen()
     running = True
     textRect = None
 
     pointerImage = pygame.image.load("hand.png")
-    pointerHotspot = (6,2)
+    defaultImage = pygame.image.load("point.png");
+    pointerHotspot = (5,0)
+
+    pygame.mouse.set_visible(False)#this is to fix stuttering on raspi
 
     global colorChanging, colorChanged, changeStart, bgColor, fgColor
     global fading, fadeStart
@@ -170,14 +191,17 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.MOUSEMOTION:
-                lastInput = time.clock()
+                lastInput = clock()
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                lastInput = time.clock()
+                lastInput = clock()
                 if onBox:
                     onClick()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    pygame.display.toggle_fullscreen()
 
         if colorChanging:
-            u = (time.clock()-changeStart)/chageTime
+            u = (clock()-changeStart)/chageTime
             if u<1:
                 bgColor = black*u+white*(1-u)
                 fgColor = white*u+black*(1-u)
@@ -187,21 +211,25 @@ def main():
                 colorChanging = False
                 colorChanged =  True
 
-        if time.clock()-lastSpeakTime > timeBetweenWords:
+        if clock()-lastSpeakTime > timeBetweenWords:
             if tutorialMode:
                 wordIndex = (lastSpokenIndex+1) % len(wordPool) #wrap to beginning
                 word = wordPool[wordIndex]
                 speakWord(word)
             else:
-                word = random.choice(wordPool)
                 if random.uniform(0,1)<displayWordChance:
                     word = displayWord
+                else:
+                    word = random.choice(wordPool)
+                    while word == displayWord:
+                        word = random.choice(wordPool)
+                
                 speakWord(word)
 
-        if erroring and time.clock()-lastError > errorTime:
+        if erroring and clock()-lastError > errorTime:
             fgColor = black if tutorialMode else white
 
-        if not tutorialMode and time.clock()-lastInput > timeout:
+        if not tutorialMode and clock()-lastInput > timeout:
             reset()
 
         screen.fill(bgColor)
@@ -210,12 +238,31 @@ def main():
         if onBox:
             displayPos = np.subtract(pos,pointerHotspot)
             displayCursor(screen, pointerImage, displayPos)
-            pygame.mouse.set_visible(False)
         else:
-            pygame.mouse.set_visible(True)
+            displayCursor(screen, defaultImage, pos)
         pygame.display.update()
-
+        
+    pwm.stop()
+    GPIO.cleanup()
     pygame.quit()
+
+
+def setAngle(angle):
+    duty = angle/18+2
+    GPIO.output(3, True)
+    pwm.ChangeDutyCycle(duty)
+
+def dispense():
+    GPIO.output(3, True)
+    setAngle(115)
+    time.sleep(.35)
+    setAngle(40)
+    time.sleep(.35)
+    GPIO.output(3, False)
+    pwm.ChangeDutyCycle(0)
 
 if __name__ == "__main__":
     main()
+        
+
+    
