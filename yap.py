@@ -47,7 +47,7 @@ timeBetweenWords     = 1
 displayWord = tutorialDisplayWords[0]
 wordPool = tutorialSpeakWords
 
-timeout = 600
+timeout = 1200
 lastInput = clock()
 displayWordChance = 0.05
 
@@ -167,6 +167,9 @@ def main():
     global pwm
     pwm = GPIO.PWM(3, 50)
     pwm.start(0)
+
+    for i in range(20):
+        dispense()
 
     pygame.display.set_caption("May I Have Your Attention Please")
     screen = pygame.display.set_mode((WIDTH,HEIGHT), pygame.DOUBLEBUF)
